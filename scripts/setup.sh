@@ -9,6 +9,7 @@
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/delascontmg-bot/Delas.git}"
+REPO_BRANCH="${REPO_BRANCH:-claude/accounting-management-system-2t6crb}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/delas}"
 DOMINIO="${DOMINIO:-}"
 
@@ -65,13 +66,13 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   git -C "$INSTALL_DIR" pull origin main || git -C "$INSTALL_DIR" pull
 else
   info "Clonando repositório em $INSTALL_DIR..."
-  git clone "$REPO_URL" "$INSTALL_DIR"
+  git clone -b "$REPO_BRANCH" "$REPO_URL" "$INSTALL_DIR"
 fi
 
 cd "$INSTALL_DIR"
 
-# Garantir branch main
-git checkout main 2>/dev/null || true
+# Garantir branch correta
+git checkout "$REPO_BRANCH" 2>/dev/null || true
 
 # ── 6. Configurar .env ───────────────────────────────────────────────────────
 if [ ! -f "$INSTALL_DIR/.env" ]; then
