@@ -702,7 +702,6 @@ async function viewPagina() {
       </div>`;
   } catch {}
 }
-}
 
 window.setPageVisibility = async (companyId, v) => {
   await api(`/api/pages/${companyId}`, { method: 'PUT', body: { visibility: v } });
