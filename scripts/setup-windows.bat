@@ -7,7 +7,6 @@ setlocal EnableDelayedExpansion
 title Delas Gestao - Instalador
 
 set INSTALL_DIR=C:\Delas
-set BRANCH=claude/accounting-management-system-2t6crb
 set ZIP_URL=https://github.com/delascontmg-bot/Delas/archive/refs/heads/claude/accounting-management-system-2t6crb.zip
 set ZIP_FOLDER=Delas-claude-accounting-management-system-2t6crb
 
@@ -28,7 +27,7 @@ if %errorLevel% neq 0 (
 )
 
 :: ── 1. Verificar/Instalar Node.js ─────────────────────────
-echo [1/6] Verificando Node.js...
+echo [1/7] Verificando Node.js...
 node --version >nul 2>&1
 if %errorLevel% neq 0 (
     echo       Node.js nao encontrado. Instalando via winget...
@@ -41,33 +40,88 @@ if %errorLevel% neq 0 (
         pause
         exit /b 1
     )
-    :: Recarregar PATH
-    call RefreshEnv.cmd >nul 2>&1
     set "PATH=%PATH%;%ProgramFiles%\nodejs"
 ) else (
-    echo       Node.js encontrado:
-    node --version
+    echo       Node.js encontrado: & node --version
 )
 
-:: ── 2. Criar diretorio de instalacao ──────────────────────
+:: ── 2. Localizar o Google Drive ───────────────────────────
 echo.
-echo [2/6] Criando pasta %INSTALL_DIR%...
-if exist "%INSTALL_DIR%" (
-    echo       Pasta ja existe - atualizando arquivos...
-) else (
-    mkdir "%INSTALL_DIR%"
+echo [2/7] Localizando o Google Drive...
+set GDRIVE_PATH=
+
+:: Tentar Google Drive for Desktop (nova versao - letra de unidade G:, H:, etc.)
+for %%D in (G H I J K) do (
+    if exist "%%D:\My Drive" (
+        set GDRIVE_PATH=%%D:\My Drive
+        goto :found_drive
+    )
+    if exist "%%D:\Meu Drive" (
+        set GDRIVE_PATH=%%D:\Meu Drive
+        goto :found_drive
+    )
 )
 
-:: ── 3. Baixar o sistema do GitHub ─────────────────────────
+:: Tentar Google Backup and Sync (versao antiga - pasta no perfil)
+if exist "%USERPROFILE%\Google Drive" (
+    set GDRIVE_PATH=%USERPROFILE%\Google Drive
+    goto :found_drive
+)
+if exist "%USERPROFILE%\Google Drive File Stream\My Drive" (
+    set GDRIVE_PATH=%USERPROFILE%\Google Drive File Stream\My Drive
+    goto :found_drive
+)
+
+:: Tentar via registro do Windows (Google Drive for Desktop)
+for /f "tokens=2*" %%a in ('reg query "HKCU\Software\Google\DriveFS" /v "PerAccountPreferences" 2^>nul') do (
+    set GDRIVE_REG=%%b
+)
+
+:found_drive
+if "!GDRIVE_PATH!"=="" (
+    echo       Google Drive nao encontrado automaticamente.
+    echo.
+    echo       Digite o caminho completo da sua pasta do Google Drive:
+    echo       Exemplo: G:\Meu Drive   ou   C:\Users\Voce\Google Drive
+    echo.
+    set /p GDRIVE_PATH="       Caminho: "
+)
+
+if "!GDRIVE_PATH!"=="" (
+    echo [ERRO] Caminho do Google Drive nao informado.
+    pause
+    exit /b 1
+)
+
+if not exist "!GDRIVE_PATH!" (
+    echo [ERRO] Pasta nao encontrada: !GDRIVE_PATH!
+    echo       Verifique se o Google Drive esta instalado e sincronizando.
+    pause
+    exit /b 1
+)
+
+set DATA_DIR=!GDRIVE_PATH!\Delas\data
+set BACKUP_DIR=!GDRIVE_PATH!\Delas\backups
+echo       Google Drive: !GDRIVE_PATH!
+echo       Dados serão salvos em: !DATA_DIR!
+
+:: ── 3. Criar diretorio de instalacao ──────────────────────
 echo.
-echo [3/6] Baixando o sistema...
+echo [3/7] Criando pasta %INSTALL_DIR%...
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
+mkdir "!DATA_DIR!" 2>nul
+mkdir "!BACKUP_DIR!" 2>nul
+
+:: ── 4. Baixar o sistema do GitHub ─────────────────────────
+echo.
+echo [4/7] Baixando o sistema...
 powershell -NoProfile -Command ^
   "Write-Host '      Conectando ao GitHub...'; ^
    try { ^
      Invoke-WebRequest -Uri '%ZIP_URL%' -OutFile '%TEMP%\delas.zip' -UseBasicParsing; ^
      Write-Host '      Download concluido.' ^
    } catch { ^
-     Write-Host '[ERRO] Falha no download: ' $_.Exception.Message; ^
+     Write-Host '[ERRO] Falha no download: ' + $_.Exception.Message; ^
      exit 1 ^
    }"
 if %errorLevel% neq 0 (
@@ -84,10 +138,6 @@ powershell -NoProfile -Command ^
 echo       Copiando para %INSTALL_DIR%...
 xcopy /e /i /y "%TEMP%\delas-extract\%ZIP_FOLDER%\*" "%INSTALL_DIR%\" >nul
 
-:: Criar diretorios necessarios
-if not exist "%INSTALL_DIR%\data" mkdir "%INSTALL_DIR%\data"
-if not exist "%INSTALL_DIR%\backups" mkdir "%INSTALL_DIR%\backups"
-
 :: Criar .env se nao existir
 if not exist "%INSTALL_DIR%\.env" (
     if exist "%INSTALL_DIR%\.env.example" (
@@ -95,29 +145,32 @@ if not exist "%INSTALL_DIR%\.env" (
     )
 )
 
-:: Limpeza temporaria
+:: Limpeza
 del /q "%TEMP%\delas.zip" >nul 2>&1
 rmdir /s /q "%TEMP%\delas-extract" >nul 2>&1
 
-:: ── 4. Criar script de inicializacao ──────────────────────
+:: ── 5. Criar script de inicializacao ──────────────────────
 echo.
-echo [4/6] Configurando inicializacao automatica...
+echo [5/7] Configurando inicializacao automatica...
 
 (
 echo @echo off
 echo title Delas Gestao - Servidor
 echo cd /d C:\Delas
+echo set DATA_DIR=!DATA_DIR!
+echo set BACKUP_DIR=!BACKUP_DIR!
 echo echo Iniciando Delas Gestao...
+echo echo Dados: !DATA_DIR!
 echo node server.js
 ) > "%INSTALL_DIR%\iniciar.bat"
 
-:: Adicionar ao startup do Windows (inicia com o login do usuario)
+:: Adicionar ao startup do Windows
 copy /y "%INSTALL_DIR%\iniciar.bat" "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\delas-gestao.bat" >nul
 echo       Configurado para iniciar com o Windows.
 
-:: ── 5. Criar atalho na area de trabalho ───────────────────
+:: ── 6. Criar atalho na area de trabalho ───────────────────
 echo.
-echo [5/6] Criando atalho na area de trabalho...
+echo [6/7] Criando atalho na area de trabalho...
 powershell -NoProfile -Command ^
   "$ws = New-Object -ComObject WScript.Shell; ^
    $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory'); ^
@@ -128,11 +181,10 @@ powershell -NoProfile -Command ^
    $s.Save()"
 echo       Atalho criado na area de trabalho.
 
-:: ── 6. Obter IP local e iniciar ───────────────────────────
+:: ── 7. Obter IP local e iniciar ───────────────────────────
 echo.
-echo [6/6] Iniciando o servidor...
+echo [7/7] Iniciando o servidor...
 
-:: Pegar IP local da rede
 for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /i "IPv4" ^| findstr /v "127.0.0.1"') do (
     set RAW_IP=%%a
     goto :got_ip
@@ -140,17 +192,17 @@ for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /i "IPv4" ^| findstr /v 
 :got_ip
 set LOCAL_IP=%RAW_IP: =%
 
-:: Iniciar servidor em segundo plano
-start "Delas Gestao" /min cmd /k "cd /d C:\Delas && node server.js"
+start "Delas Gestao" /min cmd /k "cd /d C:\Delas && set DATA_DIR=!DATA_DIR! && node server.js"
 timeout /t 4 /nobreak >nul
-
-:: Abrir no navegador
 start http://localhost:3000
 
 echo.
 echo =====================================================
 echo   Instalacao concluida com sucesso!
 echo =====================================================
+echo.
+echo   Dados salvos no Google Drive:
+echo     !DATA_DIR!
 echo.
 echo   Acesso neste computador:
 echo     http://localhost:3000
@@ -162,11 +214,13 @@ echo   Login inicial:
 echo     E-mail: fernanda@delas.com.br
 echo     Senha:  mudar123
 echo.
-echo   IMPORTANTE: Troque as senhas no primeiro acesso!
-echo.
-echo   O servidor ja esta rodando e abrira no navegador.
-echo   Na proxima vez que ligar o computador, o servidor
-echo   sobe automaticamente.
+echo   IMPORTANTE:
+echo   - Troque as senhas no primeiro acesso!
+echo   - O banco de dados fica em:
+echo     !DATA_DIR!
+echo   - O Google Drive sincroniza os dados automaticamente.
+echo   - Rode este instalador apenas em UM computador.
+echo     Os outros acessam pelo navegador.
 echo.
 echo =====================================================
 pause
