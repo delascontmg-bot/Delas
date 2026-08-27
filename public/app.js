@@ -551,7 +551,11 @@ async function viewEmpresas() {
   const mine = COMPANIES.filter((c) => !c.restricted);
   const isSocia = ME.role === 'socia';
   renderShell('Empresas / Clientes', `
-    ${isSocia ? '<div class="toolbar"><button class="btn" onclick="companyForm()">+ Nova empresa</button></div>' : ''}
+    ${isSocia ? `<div class="toolbar">
+      <button class="btn" onclick="companyForm()">+ Nova empresa</button>
+      <button class="btn secondary" onclick="importCsvModal()">⬆ Importar CSV</button>
+      <a class="btn secondary" href="/api/companies/template" download>⬇ Baixar modelo CSV</a>
+    </div>` : ''}
     <div class="card-panel">
       <table class="list">
         <thead><tr><th>Empresa</th><th>Regime</th><th>Responsável</th>${isSocia ? '<th>Honorário</th>' : ''}<th>Status</th><th></th></tr></thead>
@@ -618,6 +622,67 @@ window.companyForm = (c) => {
     m.remove();
     COMPANIES = await api('/api/companies');
     router();
+  };
+};
+
+window.importCsvModal = () => {
+  const m = modal(`
+    <h2>Importar empresas via CSV</h2>
+    <p class="muted" style="margin-bottom:12px">Selecione um arquivo CSV com as colunas:<br>
+    <code>cnpj;nome;regime;honorario;contato_nome;contato_fone;contato_email;observacoes</code><br>
+    Separador: ponto e vírgula (;) ou vírgula (,). Empresas com CNPJ já cadastrado são ignoradas.</p>
+    <div class="field">
+      <label>Arquivo CSV</label>
+      <input type="file" id="imp-file" accept=".csv,text/csv,text/plain">
+    </div>
+    <div id="imp-preview" style="margin-top:8px;font-size:13px;color:#555"></div>
+    <div class="actions">
+      <button class="btn secondary" onclick="this.closest('.modal-back').remove()">Cancelar</button>
+      <button class="btn" id="imp-btn" disabled>Importar</button>
+    </div>`);
+
+  const fileInput = m.querySelector('#imp-file');
+  const preview = m.querySelector('#imp-preview');
+  const btn = m.querySelector('#imp-btn');
+  let csvText = '';
+
+  fileInput.onchange = () => {
+    const f = fileInput.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      csvText = e.target.result;
+      const lines = csvText.split('\n').filter((l) => l.trim()).length;
+      preview.textContent = `Arquivo: ${f.name} — ${lines - 1} linha(s) de dados detectada(s).`;
+      btn.disabled = lines < 2;
+    };
+    reader.readAsText(f, 'UTF-8');
+  };
+
+  btn.onclick = async () => {
+    if (!csvText) return;
+    btn.disabled = true;
+    btn.textContent = 'Importando…';
+    try {
+      const res = await fetch('/api/companies/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv; charset=utf-8' },
+        body: csvText,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro');
+      let msg = `✔ ${data.inserted} empresa(s) importada(s).`;
+      if (data.skipped) msg += ` ${data.skipped} ignorada(s) (CNPJ já existe).`;
+      if (data.errors?.length) msg += `\nAtenção: ${data.errors.slice(0, 5).join('; ')}`;
+      alert(msg);
+      m.remove();
+      COMPANIES = await api('/api/companies');
+      router();
+    } catch (err) {
+      alert('Erro: ' + err.message);
+      btn.disabled = false;
+      btn.textContent = 'Importar';
+    }
   };
 };
 

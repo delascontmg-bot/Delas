@@ -348,6 +348,74 @@ route('PUT', /^\/api\/companies\/(\d+)$/, async (req, res, user, [id]) => {
   sendJson(res, 200, { ok: true });
 }, { socia: true });
 
+// Importação CSV de empresas
+route('GET', /^\/api\/companies\/template$/, (req, res) => {
+  const bom = '﻿';
+  const header = 'cnpj;nome;regime;honorario;contato_nome;contato_fone;contato_email;observacoes\n';
+  const example = '25.388.802/0001-41;EXEMPLO EMPRESA LTDA;Simples Nacional;800;;(31)99999-0000;contato@empresa.com;Cliente antigo\n';
+  res.writeHead(200, {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': 'attachment; filename="modelo-importacao-empresas.csv"',
+  });
+  res.end(bom + header + example);
+});
+
+route('POST', /^\/api\/companies\/import$/, async (req, res, user) => {
+  const buf = await readBody(req, 10 * 1024 * 1024);
+  const text = buf.toString('utf-8').replace(/^﻿/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length < 2) return sendJson(res, 400, { error: 'Arquivo sem dados. Verifique o modelo.' });
+
+  const raw_header = lines[0];
+  const sep = raw_header.includes(';') ? ';' : ',';
+  const headers = raw_header.split(sep).map((h) => h.toLowerCase().trim().replace(/^"|"$/g, ''));
+
+  const col = (row, ...names) => {
+    for (const n of names) {
+      const i = headers.indexOf(n);
+      if (i >= 0 && row[i] !== undefined) return row[i].trim().replace(/^"|"$/g, '') || null;
+    }
+    return null;
+  };
+
+  const regimeOk = new Set(['MEI', 'Simples Nacional', 'Lucro Presumido', 'Lucro Real']);
+  const insCompany = db.prepare(
+    `INSERT INTO companies (name, cnpj, regime, status, honorario, contato_nome, contato_fone, contato_email, observacoes)
+     VALUES (?, ?, ?, 'ativa', ?, ?, ?, ?, ?)`
+  );
+  const insPage = db.prepare('INSERT INTO pages (company_id) VALUES (?)');
+
+  let inserted = 0, skipped = 0;
+  const errors = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const row = lines[i].split(sep);
+    const nome = col(row, 'nome', 'razao_social', 'razão social', 'empresa', 'name');
+    if (!nome) { errors.push(`Linha ${i + 1}: nome vazio`); continue; }
+
+    const cnpj = col(row, 'cnpj') || null;
+    if (cnpj) {
+      const exists = db.prepare('SELECT id FROM companies WHERE cnpj = ?').get(cnpj);
+      if (exists) { skipped++; continue; }
+    }
+
+    let regime = col(row, 'regime', 'regime tributário', 'regime tributario') || 'Simples Nacional';
+    if (!regimeOk.has(regime)) regime = 'Simples Nacional';
+
+    const honorario = parseFloat((col(row, 'honorario', 'honorário', 'valor') || '0').replace(',', '.')) || 0;
+    const { lastInsertRowid } = insCompany.run(
+      nome, cnpj, regime, honorario,
+      col(row, 'contato_nome', 'contato'), col(row, 'contato_fone', 'fone', 'telefone'),
+      col(row, 'contato_email', 'email'), col(row, 'observacoes', 'observações', 'obs')
+    );
+    insPage.run(Number(lastInsertRowid));
+    audit(user.id, 'criar', 'company', Number(lastInsertRowid), nome);
+    inserted++;
+  }
+
+  sendJson(res, 200, { inserted, skipped, errors });
+}, { socia: true });
+
 // --- kanban ---
 
 route('GET', /^\/api\/boards$/, (req, res) => {
