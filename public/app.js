@@ -121,35 +121,44 @@ function renderMd(src) {
 /* ---------------- shell / navegação ---------------- */
 
 const NAV = [
-  ['#/dashboard', '🏠 Início'],
-  ['#/kanban', '📋 Kanban'],
-  ['#/fechamento', '✅ Fechamento Mensal'],
-  ['#/empresas', '🏢 Empresas'],
-  ['#/chat', '💬 Chat Interno'],
-  ['#/whatsapp', '📱 WhatsApp'],
+  ['#/dashboard', '🏠', 'Início'],
+  ['#/kanban', '📋', 'Kanban'],
+  ['#/fechamento', '✅', 'Fechamento Mensal'],
+  ['#/empresas', '🏢', 'Empresas'],
+  ['#/chat', '💬', 'Chat Interno'],
+  ['#/whatsapp', '📱', 'WhatsApp'],
 ];
 const NAV_SOCIA = [
-  ['#/financeiro', '💰 Financeiro'],
-  ['#/usuarios', '👥 Usuários'],
-  ['#/auditoria', '🔍 Auditoria'],
+  ['#/financeiro', '💰', 'Financeiro'],
+  ['#/usuarios', '👥', 'Usuários'],
+  ['#/auditoria', '🔍', 'Auditoria'],
 ];
 
 function renderShell(title, contentHtml) {
   const hash = location.hash.split('?')[0] || '#/dashboard';
-  const navItems = [...NAV, ...(ME.role === 'socia' ? NAV_SOCIA : [])]
-    .map(([h, l]) => `<a class="nav ${hash.startsWith(h) ? 'active' : ''}" href="${h}">${l}</a>`)
-    .join('');
+  const navLink = ([h, icon, label]) =>
+    `<a class="nav ${hash.startsWith(h) ? 'active' : ''}" href="${h}">
+       <span class="nav-icon">${icon}</span>${esc(label)}
+     </a>`;
+  const socia = ME.role === 'socia';
   $app.innerHTML = `
   <div class="layout">
     <div class="sidebar" id="sidebar">
-      <div class="logo">📒 Delas Gestão</div>
-      ${navItems}
+      <div class="logo">
+        <div class="logo-icon">📒</div>
+        Delas Gestão
+      </div>
+      <div class="nav-section">Principal</div>
+      ${NAV.map(navLink).join('')}
+      ${socia ? `<div class="nav-section">Gestão</div>${NAV_SOCIA.map(navLink).join('')}` : ''}
       <div class="spacer"></div>
       <div class="userbox">
-        <b>${esc(ME.name)}</b>
-        ${ME.role === 'socia' ? 'Sócia (admin)' : 'Colaborador(a)'}
-        <button onclick="openChangePassword()">Trocar senha</button>
-        <button onclick="doLogout()">Sair</button>
+        <div class="user-name">${esc(ME.name)}</div>
+        <div class="user-role">${socia ? '⭐ Sócia · Administradora' : 'Colaborador(a)'}</div>
+        <div class="user-actions">
+          <button onclick="openChangePassword()">🔑 Senha</button>
+          <button onclick="doLogout()">Sair</button>
+        </div>
       </div>
     </div>
     <div class="main">
