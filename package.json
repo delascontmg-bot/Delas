@@ -1,0 +1,16 @@
+{
+  "name": "delas-gestao",
+  "version": "1.0.0",
+  "description": "Sistema de gestão interna para escritório de contabilidade — kanban, base de conhecimento, chat, WhatsApp e financeiro",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
