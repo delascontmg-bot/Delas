@@ -726,6 +726,92 @@ table.list tr:hover td { background: var(--panel-2); }
 .page-view blockquote { border-left: 3px solid var(--brand-mid); padding-left: 14px; color: var(--ink-2); margin: 10px 0; }
 
 /* ============================================================
+   TABS DE NAVEGAÇÃO (Notas / Pendências / Documentos)
+   ============================================================ */
+.tabs-bar {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--line);
+  margin-bottom: 20px;
+  padding-bottom: 0;
+}
+.tab {
+  padding: 8px 18px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  text-decoration: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  transition: background .12s, color .12s;
+  margin-bottom: -2px;
+}
+.tab:hover { background: var(--panel-2); color: var(--ink); }
+.tab.active {
+  background: var(--panel);
+  color: var(--brand);
+  border-color: var(--line);
+  border-bottom-color: var(--panel);
+  font-weight: 600;
+}
+
+/* ============================================================
+   PAINEL DE EXCEÇÕES (Dashboard)
+   ============================================================ */
+.exc-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  margin-bottom: 20px;
+}
+.exc-panel.exc-ok {
+  border-color: #22c55e44;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 14px;
+  font-weight: 500;
+}
+.exc-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 99px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: default;
+}
+.exc-danger {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+.exc-warn {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+/* ============================================================
+   TABELAS DE PENDÊNCIAS E DOCUMENTOS
+   ============================================================ */
+.resolved-row td { opacity: .55; text-decoration: line-through; }
+.resolved-row td:last-child { text-decoration: none; opacity: 1; }
+
+/* ============================================================
+   BADGES DE ORIGEM NOS CARDS KANBAN
+   ============================================================ */
+.badge.origem-cliente    { background: #dbeafe; color: #1e40af; }
+.badge.origem-periodico  { background: #d1fae5; color: #065f46; }
+.badge.origem-prazo_legal { background: #fef3c7; color: #92400e; }
+.badge.origem-retrabalho { background: #fee2e2; color: #991b1b; }
+
+/* ============================================================
    RESPONSIVO
    ============================================================ */
 @media (max-width: 900px) {

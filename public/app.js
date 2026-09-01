@@ -299,8 +299,21 @@ async function viewDashboard() {
     <div class="stat"><div class="num" style="color:var(--danger)">${fmtMoney(d.fin.inadimplencia)}</div><div class="lbl">Inadimplência</div></div>
     <div class="stat"><div class="num">${fmtMoney(d.fin.a_pagar)}</div><div class="lbl">A pagar (pendente)</div></div>` : '';
   const pct = d.closing.total ? Math.round((d.closing.done / d.closing.total) * 100) : 0;
+
+  // Painel de atenção — exceções que exigem intervenção
+  const exceptions = [];
+  if (d.overdue) exceptions.push(`<span class="exc-item exc-danger">🚨 ${d.overdue} tarefa(s) atrasada(s)</span>`);
+  if (d.nearDue) exceptions.push(`<span class="exc-item exc-warn">⏰ ${d.nearDue} tarefa(s) vencem em até 3 dias</span>`);
+  if (d.pendenciasAbertas) exceptions.push(`<span class="exc-item exc-warn">⚠️ ${d.pendenciasAbertas} pendência(s) em aberto</span>`);
+  if (d.docsVencidos) exceptions.push(`<span class="exc-item exc-danger">📁 ${d.docsVencidos} documento(s) vencido(s)</span>`);
+  if (d.semResponsavel) exceptions.push(`<span class="exc-item exc-warn">👤 ${d.semResponsavel} tarefa(s) sem responsável</span>`);
+  const excPanel = exceptions.length
+    ? `<div class="exc-panel">${exceptions.join('')}</div>`
+    : `<div class="exc-panel exc-ok">✅ Nenhuma exceção crítica no momento</div>`;
+
   renderShell('Início', `
-    <div class="grid4">
+    ${excPanel}
+    <div class="grid4" style="margin-top:16px">
       <div class="stat"><div class="num">${d.myTasks.length}</div><div class="lbl">Minhas tarefas abertas</div></div>
       <div class="stat"><div class="num" style="color:${d.overdue ? 'var(--danger)' : 'inherit'}">${d.overdue}</div><div class="lbl">Tarefas atrasadas</div></div>
       <div class="stat"><div class="num">${pct}%</div><div class="lbl">Fechamento ${d.closing.competencia}</div></div>
@@ -311,14 +324,22 @@ async function viewDashboard() {
       <h3 style="margin-top:0">Minhas tarefas</h3>
       ${d.myTasks.length === 0 ? '<p class="muted">Nenhuma tarefa atribuída a você. 🎉</p>' : `
       <table class="list"><thead><tr><th>Tarefa</th><th>Empresa</th><th>Coluna</th><th>Prazo</th><th>Prioridade</th></tr></thead>
-      <tbody>${d.myTasks.map((t) => `
-        <tr>
+      <tbody>${d.myTasks.map((t) => {
+        const isOverdue = t.due_date && t.due_date < today();
+        const isNear = t.due_date && t.due_date >= today() && t.due_date <= new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+        const dateHtml = isOverdue
+          ? `<span class="badge late">🚨 ${fmtDate(t.due_date)}</span>`
+          : isNear
+            ? `<span class="badge warn">⏰ ${fmtDate(t.due_date)}</span>`
+            : fmtDate(t.due_date);
+        return `<tr>
           <td>${esc(t.title)}</td>
           <td>${esc(t.company_name || '—')}</td>
           <td>${esc(t.column_name)}</td>
-          <td>${t.due_date && t.due_date < today() ? `<span class="badge late">${fmtDate(t.due_date)}</span>` : fmtDate(t.due_date)}</td>
+          <td>${dateHtml}</td>
           <td><span class="badge prio-${t.priority}">${t.priority}</span></td>
-        </tr>`).join('')}</tbody></table>`}
+        </tr>`;
+      }).join('')}</tbody></table>`}
     </div>`);
 }
 
@@ -362,6 +383,7 @@ async function viewKanban() {
             ${c.assignee_name ? `<span>👤 ${esc(c.assignee_name)}</span>` : ''}
             ${c.due_date ? `<span class="${c.due_date < today() && !c.done_at ? 'badge late' : ''}">📅 ${fmtDate(c.due_date)}</span>` : ''}
             ${c.priority !== 'normal' ? `<span class="badge prio-${c.priority}">${c.priority}</span>` : ''}
+            ${c.origem && c.origem !== 'interno' ? `<span class="badge origem-${c.origem}">${esc(origemLabel(c.origem))}</span>` : ''}
             ${c.checklist_total ? `<span>☑ ${c.checklist_done}/${c.checklist_total}</span>` : ''}
             ${c.comment_count ? `<span>💬 ${c.comment_count}</span>` : ''}
           </div>
@@ -448,6 +470,19 @@ window.newColumn = (boardId) => {
   api('/api/columns', { body: { board_id: boardId, name } }).then(router);
 };
 
+const ORIGENS = [
+  ['interno', 'Atividade interna'],
+  ['cliente', 'Solicitação de cliente'],
+  ['periodico', 'Obrigação periódica'],
+  ['prazo_legal', 'Prazo legal'],
+  ['retrabalho', 'Retrabalho'],
+];
+
+function origemLabel(o) {
+  const found = ORIGENS.find(([v]) => v === o);
+  return found ? found[1] : o;
+}
+
 window.openCardForm = (card, columnId, boardId) => {
   const c = card || {};
   const m = modal(`
@@ -460,6 +495,8 @@ window.openCardForm = (card, columnId, boardId) => {
       <div class="field"><label>Prazo</label><input type="date" id="cf-due" value="${c.due_date || ''}"></div>
       <div class="field"><label>Prioridade</label>
         <select id="cf-prio">${['baixa', 'normal', 'alta', 'urgente'].map((p) => `<option ${(c.priority || 'normal') === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+      <div class="field"><label>Origem da demanda</label>
+        <select id="cf-origem">${ORIGENS.map(([v, l]) => `<option value="${v}" ${(c.origem || 'interno') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     </div>
     <div class="actions">
       ${card ? '<button class="btn danger" id="cf-del" style="margin-right:auto">Excluir</button>' : ''}
@@ -474,6 +511,7 @@ window.openCardForm = (card, columnId, boardId) => {
       assignee_id: Number(m.querySelector('#cf-assignee').value) || null,
       due_date: m.querySelector('#cf-due').value || null,
       priority: m.querySelector('#cf-prio').value,
+      origem: m.querySelector('#cf-origem').value,
     };
     if (!body.title) return;
     if (card) await api(`/api/cards/${card.id}`, { method: 'PUT', body });
@@ -498,6 +536,7 @@ window.openCard = async (id, boardId) => {
       ${c.company_name ? `🏢 ${esc(c.company_name)} · ` : ''}
       ${c.assignee_name ? `👤 ${esc(c.assignee_name)} · ` : ''}
       📅 ${fmtDate(c.due_date)} · <span class="badge prio-${c.priority}">${c.priority}</span>
+      ${c.origem && c.origem !== 'interno' ? ` · <span class="badge">${esc(origemLabel(c.origem))}</span>` : ''}
     </p>
     ${c.description ? `<p style="white-space:pre-wrap">${esc(c.description)}</p>` : ''}
     <h3 style="font-size:14px">Checklist</h3>
@@ -720,8 +759,82 @@ const PAGE_TEMPLATE = `# Dados cadastrais
 async function viewPagina() {
   const params = new URLSearchParams(location.hash.split('?')[1] || '');
   const companyId = Number(params.get('empresa'));
+  const tab = params.get('tab') || 'notas';
   const company = COMPANIES.find((c) => c.id === companyId);
   if (!companyId) { location.hash = '#/empresas'; return; }
+  const isSocia = ME.role === 'socia';
+  const compName = company ? company.name : 'Cliente';
+  const tabBase = `#/pagina?empresa=${companyId}&tab=`;
+  const tabBar = `
+    <div class="tabs-bar">
+      <a class="tab ${tab === 'notas' ? 'active' : ''}" href="${tabBase}notas">📄 Notas</a>
+      <a class="tab ${tab === 'pendencias' ? 'active' : ''}" href="${tabBase}pendencias">⚠️ Pendências</a>
+      <a class="tab ${tab === 'documentos' ? 'active' : ''}" href="${tabBase}documentos">📁 Documentos</a>
+    </div>`;
+
+  if (tab === 'pendencias') {
+    const pends = await api(`/api/pendencias?company_id=${companyId}`);
+    renderShell(`${compName} — Pendências`, `
+      <div class="toolbar">
+        <a class="btn secondary" href="#/empresas">← Empresas</a>
+        <button class="btn" onclick="pendenciaForm(${companyId})">+ Nova pendência</button>
+      </div>
+      ${tabBar}
+      <div class="card-panel">
+        ${pends.length === 0 ? '<p class="muted">Nenhuma pendência registrada. ✅</p>' : `
+        <table class="list">
+          <thead><tr><th>Título</th><th>Origem</th><th>Responsável</th><th>Prazo</th><th>Prioridade</th><th>Status</th><th></th></tr></thead>
+          <tbody>${pends.map((p) => `
+            <tr class="${p.status === 'resolvida' ? 'resolved-row' : ''}">
+              <td><b>${esc(p.titulo)}</b>${p.descricao ? `<br><span class="muted">${esc(p.descricao.slice(0, 60))}${p.descricao.length > 60 ? '…' : ''}</span>` : ''}</td>
+              <td class="muted">${esc(p.origem || '—')}</td>
+              <td>${esc(p.responsavel_nome || '—')}</td>
+              <td>${p.due_date && p.due_date < today() && p.status === 'aberta' ? `<span class="badge late">${fmtDate(p.due_date)}</span>` : fmtDate(p.due_date)}</td>
+              <td><span class="badge prio-${p.prioridade}">${p.prioridade}</span></td>
+              <td><span class="badge ${p.status === 'resolvida' ? 'ok' : 'warn'}">${p.status}</span></td>
+              <td style="white-space:nowrap">
+                ${p.status === 'aberta'
+                  ? `<button class="btn small" onclick="resolvePendencia(${p.id})">✓ Resolver</button>`
+                  : `<button class="btn small secondary" onclick="reabrirPendencia(${p.id})">Reabrir</button>`}
+                <button class="btn small secondary" onclick="pendenciaForm(${companyId}, ${JSON.stringify(p).replace(/"/g, '&quot;')})">✏️</button>
+                <button class="btn small secondary" onclick="delPendencia(${p.id})">✕</button>
+              </td>
+            </tr>`).join('')}</tbody></table>`}
+      </div>`);
+    return;
+  }
+
+  if (tab === 'documentos') {
+    const docs = await api(`/api/documentos/${companyId}`);
+    const statusColor = { solicitado: 'warn', recebido: 'ok', pendente: 'warn', vencido: 'late', aprovado: 'ok', recusado: 'late' };
+    renderShell(`${compName} — Documentos`, `
+      <div class="toolbar">
+        <a class="btn secondary" href="#/empresas">← Empresas</a>
+        <button class="btn" onclick="docForm(${companyId})">+ Adicionar documento</button>
+      </div>
+      ${tabBar}
+      <div class="card-panel">
+        ${docs.length === 0 ? '<p class="muted">Nenhum documento registrado.</p>' : `
+        <table class="list">
+          <thead><tr><th>Documento</th><th>Status</th><th>Prazo</th><th>Observações</th><th></th></tr></thead>
+          <tbody>${docs.map((d) => `
+            <tr>
+              <td><b>${esc(d.nome)}</b></td>
+              <td><span class="badge ${statusColor[d.status] || ''}">${d.status}</span></td>
+              <td>${d.prazo && d.prazo < today() && !['recebido','aprovado'].includes(d.status) ? `<span class="badge late">${fmtDate(d.prazo)}</span>` : fmtDate(d.prazo)}</td>
+              <td class="muted">${esc(d.observacoes || '')}</td>
+              <td style="white-space:nowrap">
+                <select class="btn small secondary" style="height:28px;padding:2px 6px" onchange="changeDocStatus(${d.id}, this.value)">
+                  ${['solicitado','recebido','pendente','vencido','aprovado','recusado'].map((s) => `<option ${d.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+                </select>
+                <button class="btn small secondary" onclick="delDoc(${d.id})">✕</button>
+              </td>
+            </tr>`).join('')}</tbody></table>`}
+      </div>`);
+    return;
+  }
+
+  // Tab notas (padrão)
   let page;
   try {
     page = await api(`/api/pages/${companyId}`);
@@ -729,35 +842,30 @@ async function viewPagina() {
     renderShell('Página do cliente', `<div class="card-panel"><p>⚠️ ${esc(e.message)}</p><a href="#/empresas">← Voltar</a></div>`);
     return;
   }
-  const isSocia = ME.role === 'socia';
-  renderShell(`Página — ${company ? company.name : 'Cliente'}`, `
+  renderShell(`${compName} — Notas`, `
     <div class="toolbar">
       <a class="btn secondary" href="#/empresas">← Empresas</a>
       <button class="btn secondary" onclick="editPage(${companyId})">✏️ Editar</button>
       <button class="btn secondary" onclick="pageVersions(${companyId})">🕓 Versões</button>
-      <button class="btn" onclick="pageToTask(${companyId})">➕ Gerar tarefa no kanban</button>
+      <button class="btn" onclick="pageToTask(${companyId})">➕ Gerar tarefa</button>
       ${isSocia ? `
         <div><label>Visibilidade</label>
         <select onchange="setPageVisibility(${companyId}, this.value)">
-          <option value="liberada" ${page.visibility === 'liberada' ? 'selected' : ''}>Liberada (colaborador responsável)</option>
+          <option value="liberada" ${page.visibility === 'liberada' ? 'selected' : ''}>Liberada</option>
           <option value="restrita" ${page.visibility === 'restrita' ? 'selected' : ''}>Restrita às sócias</option>
         </select></div>` :
         `<span class="badge ${page.visibility}">${page.visibility}</span>`}
     </div>
+    ${tabBar}
     <div class="card-panel page-view">
-      ${page.content ? renderMd(page.content) : '<p class="muted">Página vazia. Clique em Editar para começar (um modelo será sugerido).</p>'}
+      ${page.content ? renderMd(page.content) : '<p class="muted">Página vazia. Clique em Editar para começar.</p>'}
     </div>
     <p class="muted">${page.updated_by_name ? `Última edição por ${esc(page.updated_by_name)} em ${fmtDateTime(page.updated_at)}` : 'Nunca editada'}</p>
     <div id="wa-history-section"></div>`);
-  // Carregar histórico de WhatsApp vinculado a esta empresa (assíncrono).
   try {
     const waConvs = await api(`/api/wa/conversations?company_id=${companyId}`);
     const sec = document.getElementById('wa-history-section');
-    if (!sec) return;
-    if (!waConvs.length) {
-      sec.innerHTML = '';
-      return;
-    }
+    if (!sec || !waConvs.length) return;
     sec.innerHTML = `
       <div class="card-panel" style="margin-top:0">
         <h3 style="margin-top:0">📱 Atendimentos via WhatsApp</h3>
@@ -776,6 +884,97 @@ async function viewPagina() {
       </div>`;
   } catch {}
 }
+
+// Pendências helpers
+window.pendenciaForm = (companyId, p) => {
+  p = p ? (typeof p === 'string' ? JSON.parse(p) : p) : {};
+  const m = modal(`
+    <h2>${p.id ? 'Editar pendência' : 'Nova pendência'}</h2>
+    <div class="field"><label>Título *</label><input id="pe-titulo" value="${esc(p.titulo || '')}"></div>
+    <div class="field"><label>Descrição</label><textarea id="pe-desc" rows="2">${esc(p.descricao || '')}</textarea></div>
+    <div class="grid2">
+      <div class="field"><label>Origem</label><input id="pe-origem" value="${esc(p.origem || '')}" placeholder="ex: cliente, fiscal, prazo legal"></div>
+      <div class="field"><label>Responsável</label><select id="pe-resp">${selectOptions(USERS.filter((u) => u.active), 'id', 'name', p.responsavel_id || '', '— ninguém —')}</select></div>
+      <div class="field"><label>Prioridade</label>
+        <select id="pe-prio">${['baixa','normal','alta','urgente'].map((v) => `<option ${(p.prioridade || 'normal') === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+      <div class="field"><label>Prazo</label><input type="date" id="pe-due" value="${p.due_date || ''}"></div>
+    </div>
+    <div class="actions">
+      <button class="btn secondary" onclick="this.closest('.modal-back').remove()">Cancelar</button>
+      <button class="btn" id="pe-save">Salvar</button>
+    </div>`);
+  m.querySelector('#pe-save').onclick = async () => {
+    const body = {
+      company_id: companyId,
+      titulo: m.querySelector('#pe-titulo').value.trim(),
+      descricao: m.querySelector('#pe-desc').value || null,
+      origem: m.querySelector('#pe-origem').value.trim() || null,
+      responsavel_id: Number(m.querySelector('#pe-resp').value) || null,
+      prioridade: m.querySelector('#pe-prio').value,
+      due_date: m.querySelector('#pe-due').value || null,
+    };
+    if (!body.titulo) return;
+    if (p.id) await api(`/api/pendencias/${p.id}`, { method: 'PUT', body });
+    else await api('/api/pendencias', { body });
+    m.remove();
+    router();
+  };
+};
+
+window.resolvePendencia = async (id) => {
+  await api(`/api/pendencias/${id}`, { method: 'PUT', body: { status: 'resolvida' } });
+  router();
+};
+window.reabrirPendencia = async (id) => {
+  await api(`/api/pendencias/${id}`, { method: 'PUT', body: { status: 'aberta' } });
+  router();
+};
+window.delPendencia = async (id) => {
+  if (!confirm('Excluir esta pendência?')) return;
+  await api(`/api/pendencias/${id}`, { method: 'DELETE' });
+  router();
+};
+
+// Documentos helpers
+window.docForm = (companyId) => {
+  const m = modal(`
+    <h2>Adicionar documento</h2>
+    <div class="field"><label>Nome do documento *</label><input id="doc-nome" placeholder="ex: Contrato Social, DECORE, Balancete"></div>
+    <div class="grid2">
+      <div class="field"><label>Status inicial</label>
+        <select id="doc-status">${['pendente','solicitado','recebido','aprovado'].map((s) => `<option>${s}</option>`).join('')}</select></div>
+      <div class="field"><label>Prazo</label><input type="date" id="doc-prazo"></div>
+    </div>
+    <div class="field"><label>Observações</label><input id="doc-obs"></div>
+    <div class="actions">
+      <button class="btn secondary" onclick="this.closest('.modal-back').remove()">Cancelar</button>
+      <button class="btn" id="doc-save">Salvar</button>
+    </div>`);
+  m.querySelector('#doc-save').onclick = async () => {
+    const nome = m.querySelector('#doc-nome').value.trim();
+    if (!nome) return;
+    await api(`/api/documentos/${companyId}`, {
+      body: {
+        nome,
+        status: m.querySelector('#doc-status').value,
+        prazo: m.querySelector('#doc-prazo').value || null,
+        observacoes: m.querySelector('#doc-obs').value || null,
+      },
+    });
+    m.remove();
+    router();
+  };
+};
+
+window.changeDocStatus = async (id, status) => {
+  await api(`/api/documentos/doc/${id}`, { method: 'PUT', body: { status } });
+  toast('Status atualizado');
+};
+window.delDoc = async (id) => {
+  if (!confirm('Remover este documento?')) return;
+  await api(`/api/documentos/doc/${id}`, { method: 'DELETE' });
+  router();
+};
 
 window.setPageVisibility = async (companyId, v) => {
   await api(`/api/pages/${companyId}`, { method: 'PUT', body: { visibility: v } });

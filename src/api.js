@@ -488,12 +488,13 @@ function createCard(user, b) {
     .get(b.column_id).m;
   const { lastInsertRowid } = db
     .prepare(
-      `INSERT INTO cards (column_id, title, description, company_id, assignee_id, due_date, priority, position, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO cards (column_id, title, description, company_id, assignee_id, due_date, priority, position, created_by, origem)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       b.column_id, b.title, b.description ?? null, b.company_id ?? null,
-      b.assignee_id ?? null, b.due_date ?? null, b.priority ?? 'normal', max + 1, user.id
+      b.assignee_id ?? null, b.due_date ?? null, b.priority ?? 'normal', max + 1, user.id,
+      b.origem ?? 'interno'
     );
   const id = Number(lastInsertRowid);
   if (b.assignee_id && b.assignee_id !== user.id) {
@@ -541,12 +542,13 @@ route('PUT', /^\/api\/cards\/(\d+)$/, async (req, res, user, [id]) => {
   }
   db.prepare(
     `UPDATE cards SET column_id = ?, title = ?, description = ?, company_id = ?, assignee_id = ?,
-      due_date = ?, priority = ?, position = ?, done_at = ? WHERE id = ?`
+      due_date = ?, priority = ?, position = ?, done_at = ?, origem = ? WHERE id = ?`
   ).run(
     columnId, b.title ?? c.title, b.description ?? c.description,
     b.company_id === undefined ? c.company_id : b.company_id, assignee,
     b.due_date === undefined ? c.due_date : b.due_date, b.priority ?? c.priority,
-    b.position === undefined ? c.position : b.position, doneAt, id
+    b.position === undefined ? c.position : b.position, doneAt,
+    b.origem ?? c.origem ?? 'interno', id
   );
   if (assignee && assignee !== c.assignee_id && assignee !== user.id) {
     notify(assignee, `${user.name} atribuiu a tarefa "${b.title ?? c.title}" a você`, '#/kanban');
@@ -600,6 +602,114 @@ route('PUT', /^\/api\/checklist\/(\d+)$/, async (req, res, user, [id]) => {
 
 route('DELETE', /^\/api\/checklist\/(\d+)$/, (req, res, user, [id]) => {
   db.prepare('DELETE FROM card_checklist WHERE id = ?').run(id);
+  sendJson(res, 200, { ok: true });
+});
+
+// --- pendências ---
+
+route('GET', /^\/api\/pendencias$/, (req, res, user, params, url) => {
+  const cid = url.searchParams.get('company_id');
+  const status = url.searchParams.get('status') || '';
+  let sql = `SELECT p.*, u.name AS responsavel_nome, c.name AS company_name
+             FROM pendencias p
+             LEFT JOIN users u ON u.id = p.responsavel_id
+             LEFT JOIN companies c ON c.id = p.company_id
+             WHERE 1=1`;
+  const args = [];
+  if (cid) { sql += ' AND p.company_id = ?'; args.push(cid); }
+  if (status) { sql += ' AND p.status = ?'; args.push(status); }
+  sql += " ORDER BY CASE p.prioridade WHEN 'urgente' THEN 0 WHEN 'alta' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, p.due_date IS NULL, p.due_date";
+  sendJson(res, 200, db.prepare(sql).all(...args));
+});
+
+route('POST', /^\/api\/pendencias$/, async (req, res, user) => {
+  const b = await readJson(req);
+  if (!b.titulo) return sendJson(res, 400, { error: 'Título é obrigatório' });
+  const { lastInsertRowid } = db.prepare(
+    `INSERT INTO pendencias (company_id, titulo, descricao, origem, responsavel_id, prioridade, status, due_date, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, 'aberta', ?, ?)`
+  ).run(
+    b.company_id ?? null, b.titulo, b.descricao ?? null, b.origem ?? null,
+    b.responsavel_id ?? null, b.prioridade ?? 'normal', b.due_date ?? null, user.id
+  );
+  if (b.responsavel_id && b.responsavel_id !== user.id) {
+    notify(b.responsavel_id, `${user.name} criou uma pendência: "${b.titulo}"`, '#/empresas');
+  }
+  audit(user.id, 'criar', 'pendencia', Number(lastInsertRowid), b.titulo);
+  sendJson(res, 200, { id: Number(lastInsertRowid) });
+});
+
+route('PUT', /^\/api\/pendencias\/(\d+)$/, async (req, res, user, [id]) => {
+  const p = db.prepare('SELECT * FROM pendencias WHERE id = ?').get(id);
+  if (!p) return sendJson(res, 404, { error: 'Pendência não encontrada' });
+  const b = await readJson(req);
+  const status = ['aberta', 'resolvida'].includes(b.status) ? b.status : p.status;
+  const resolvedAt = (status === 'resolvida' && p.status !== 'resolvida')
+    ? new Date().toISOString() : (status === 'aberta' ? null : p.resolved_at);
+  db.prepare(
+    `UPDATE pendencias SET titulo = ?, descricao = ?, origem = ?, responsavel_id = ?,
+     prioridade = ?, status = ?, due_date = ?, resolved_at = ? WHERE id = ?`
+  ).run(
+    b.titulo ?? p.titulo, b.descricao ?? p.descricao, b.origem ?? p.origem,
+    b.responsavel_id === undefined ? p.responsavel_id : b.responsavel_id,
+    b.prioridade ?? p.prioridade, status,
+    b.due_date === undefined ? p.due_date : b.due_date,
+    resolvedAt, id
+  );
+  audit(user.id, 'editar', 'pendencia', Number(id), b.titulo ?? p.titulo);
+  sendJson(res, 200, { ok: true });
+});
+
+route('DELETE', /^\/api\/pendencias\/(\d+)$/, (req, res, user, [id]) => {
+  db.prepare('DELETE FROM pendencias WHERE id = ?').run(id);
+  audit(user.id, 'excluir', 'pendencia', Number(id), null);
+  sendJson(res, 200, { ok: true });
+});
+
+// --- documentos por empresa ---
+
+route('GET', /^\/api\/documentos\/(\d+)$/, (req, res, user, [companyId]) => {
+  if (!canSeeCompany(user, Number(companyId))) return sendJson(res, 403, { error: 'Sem acesso' });
+  sendJson(res, 200, db.prepare(
+    `SELECT d.*, u.name AS updated_by_name FROM documentos_empresa d
+     LEFT JOIN users u ON u.id = d.updated_by
+     WHERE d.company_id = ? ORDER BY d.id`
+  ).all(companyId));
+});
+
+route('POST', /^\/api\/documentos\/(\d+)$/, async (req, res, user, [companyId]) => {
+  if (!canSeeCompany(user, Number(companyId))) return sendJson(res, 403, { error: 'Sem acesso' });
+  const b = await readJson(req);
+  if (!b.nome) return sendJson(res, 400, { error: 'Nome é obrigatório' });
+  const { lastInsertRowid } = db.prepare(
+    "INSERT INTO documentos_empresa (company_id, nome, status, prazo, observacoes, updated_by) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(companyId, b.nome, b.status ?? 'pendente', b.prazo ?? null, b.observacoes ?? null, user.id);
+  sendJson(res, 200, { id: Number(lastInsertRowid) });
+});
+
+route('PUT', /^\/api\/documentos\/doc\/(\d+)$/, async (req, res, user, [id]) => {
+  const d = db.prepare('SELECT * FROM documentos_empresa WHERE id = ?').get(id);
+  if (!d) return sendJson(res, 404, { error: 'Documento não encontrado' });
+  if (!canSeeCompany(user, d.company_id)) return sendJson(res, 403, { error: 'Sem acesso' });
+  const b = await readJson(req);
+  const validStatus = ['solicitado', 'recebido', 'pendente', 'vencido', 'aprovado', 'recusado'];
+  db.prepare(
+    "UPDATE documentos_empresa SET nome = ?, status = ?, prazo = ?, observacoes = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(
+    b.nome ?? d.nome,
+    validStatus.includes(b.status) ? b.status : d.status,
+    b.prazo === undefined ? d.prazo : b.prazo,
+    b.observacoes ?? d.observacoes,
+    user.id, id
+  );
+  sendJson(res, 200, { ok: true });
+});
+
+route('DELETE', /^\/api\/documentos\/doc\/(\d+)$/, (req, res, user, [id]) => {
+  const d = db.prepare('SELECT * FROM documentos_empresa WHERE id = ?').get(id);
+  if (!d) return sendJson(res, 404, { error: 'Documento não encontrado' });
+  if (!canSeeCompany(user, d.company_id)) return sendJson(res, 403, { error: 'Sem acesso' });
+  db.prepare('DELETE FROM documentos_empresa WHERE id = ?').run(id);
   sendJson(res, 200, { ok: true });
 });
 
@@ -1287,6 +1397,7 @@ route('GET', /^\/api\/audit$/, (req, res) => {
 
 route('GET', /^\/api\/dashboard$/, (req, res, user) => {
   const today = new Date().toISOString().slice(0, 10);
+  const in3 = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
   const myTasks = db
     .prepare(
       `SELECT k.id, k.title, k.due_date, k.priority, c.name AS company_name, col.name AS column_name
@@ -1298,6 +1409,7 @@ route('GET', /^\/api\/dashboard$/, (req, res, user) => {
     )
     .all(user.id);
   const overdue = myTasks.filter((t) => t.due_date && t.due_date < today).length;
+  const nearDue = myTasks.filter((t) => t.due_date && t.due_date >= today && t.due_date <= in3).length;
   const comp = currentCompetencia();
   const closing = db
     .prepare(
@@ -1309,8 +1421,18 @@ route('GET', /^\/api\/dashboard$/, (req, res, user) => {
   const waOpen = db
     .prepare("SELECT COUNT(*) AS n FROM wa_conversations WHERE status = 'aberta'")
     .get().n;
-  const out = { myTasks, overdue, closing: { ...closing, competencia: comp }, waOpen };
+  const pendenciasAbertas = db
+    .prepare("SELECT COUNT(*) AS n FROM pendencias WHERE status = 'aberta'")
+    .get().n;
+  const docsVencidos = db
+    .prepare("SELECT COUNT(*) AS n FROM documentos_empresa WHERE status = 'vencido'")
+    .get().n;
+  const out = { myTasks, overdue, nearDue, closing: { ...closing, competencia: comp }, waOpen, pendenciasAbertas, docsVencidos };
   if (isSocia(user)) {
+    const semResponsavel = db
+      .prepare("SELECT COUNT(*) AS n FROM cards WHERE assignee_id IS NULL AND done_at IS NULL")
+      .get().n;
+    out.semResponsavel = semResponsavel;
     const fin = db
       .prepare(
         `SELECT COALESCE(SUM(CASE WHEN status = 'pendente' AND due_date < ? THEN amount END), 0) AS inadimplencia,

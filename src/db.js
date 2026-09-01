@@ -208,6 +208,32 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS pendencias (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
+  titulo TEXT NOT NULL,
+  descricao TEXT,
+  origem TEXT,
+  responsavel_id INTEGER REFERENCES users(id),
+  prioridade TEXT NOT NULL DEFAULT 'normal',
+  status TEXT NOT NULL DEFAULT 'aberta',
+  due_date TEXT,
+  resolved_at TEXT,
+  created_by INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS documentos_empresa (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  nome TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pendente',
+  prazo TEXT,
+  observacoes TEXT,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 // ---- Seed inicial (roda só uma vez, quando não há usuários) ----
@@ -260,6 +286,9 @@ function seed() {
     ])
   );
 }
+// Migrações incrementais — safe em bancos antigos.
+try { db.exec("ALTER TABLE cards ADD COLUMN origem TEXT DEFAULT 'interno'"); } catch {}
+
 seed();
 
 module.exports = db;
